@@ -19,6 +19,7 @@ class ServerStats(TypedDict):
     admin_stats: Dict[str, AdminStats]
     chat_count: int
     daily_ahelps: Dict[date, Dict[str, int]]
+    hourly_ahelps: Dict[date, Dict[int, Dict[str, int]]]
 
 
 DEFAULT_ADMIN_STATS: AdminStats = {"ahelps": 0, "mentions": 0, "role": "Не указано", "sessions": 0}
@@ -27,10 +28,13 @@ DEFAULT_ADMIN_STATS: AdminStats = {"ahelps": 0, "mentions": 0, "role": "Не у�
 def process_embed_data(
         embeds: list,
         message_datetime: Optional[datetime]
-) -> Tuple[Dict[str, AdminStats], int, Dict[str, int]]:
+) -> Tuple[Dict[str, AdminStats], int, Dict[str, int], int, int]:
     admin_stats = defaultdict(lambda: dict(DEFAULT_ADMIN_STATS))
     daily_ahelps = defaultdict(int)
     chat_count = 0
+
+    total_ahelps_count = 0
+    processed_ahelps_count = 0
 
     for embed in embeds:
         description = embed.get('description', '')
@@ -41,6 +45,7 @@ def process_embed_data(
         is_chat = any(':inbox_tray:' in line or ':outbox_tray:' in line for line in lines)
         admins_in_session = set()
         has_ahelp = False
+        admin_responded = False
 
         for line in lines:
             if ":outbox_tray:" in line:
@@ -49,6 +54,7 @@ def process_embed_data(
                     admins_in_session.add(admin_name)
                     if admin_role != "Не указано":
                         admin_stats[admin_name]["role"] = admin_role
+                admin_responded = True
 
             elif ":inbox_tray:" in line:
                 for admin_name in admins_in_session:
@@ -64,7 +70,12 @@ def process_embed_data(
                     if message_datetime:
                         daily_ahelps[admin_name] += 1
 
-    return admin_stats, chat_count, daily_ahelps
+        if has_ahelp:
+            total_ahelps_count += 1
+            if admin_responded:
+                processed_ahelps_count += 1
+
+    return admin_stats, chat_count, daily_ahelps, total_ahelps_count, processed_ahelps_count
 
 
 def load_json_file(file_path: str) -> Optional[Any]:
@@ -89,6 +100,7 @@ def analyze_ahelp_data(data: Any, server_name: str) -> ServerStats:
     admin_stats = defaultdict(lambda: dict(DEFAULT_ADMIN_STATS))
     total_chat_count = 0
     daily_ahelps = defaultdict(lambda: defaultdict(int))
+    hourly_ahelps = defaultdict(lambda: defaultdict(lambda: {"total": 0, "processed": 0}))
 
     if isinstance(data, list):
         messages = data
@@ -100,7 +112,8 @@ def analyze_ahelp_data(data: Any, server_name: str) -> ServerStats:
         message_timestamp = message.get('created_at', '')
         msg_dt = parse_message_time(message_timestamp)
 
-        local_stats, local_chats, local_daily_ahelps = process_embed_data(embeds, msg_dt)
+        local_stats, local_chats, local_daily_ahelps, total_ahelps_count, processed_ahelps_count = process_embed_data(
+            embeds, msg_dt)
 
         for admin, stats in local_stats.items():
             admin_stats[admin]["ahelps"] += stats["ahelps"]
@@ -113,12 +126,22 @@ def analyze_ahelp_data(data: Any, server_name: str) -> ServerStats:
             for admin, ahelps_count in local_daily_ahelps.items():
                 daily_ahelps[msg_dt.date()][admin] += ahelps_count
 
+            if total_ahelps_count > 0:
+                d = msg_dt.date()
+                h = msg_dt.hour
+                hourly_ahelps[d][h]["total"] += total_ahelps_count
+                hourly_ahelps[d][h]["processed"] += processed_ahelps_count
+
         total_chat_count += local_chats
 
     return {
         "admin_stats": dict(admin_stats),
         "chat_count": total_chat_count,
         "daily_ahelps": dict(daily_ahelps),
+        "hourly_ahelps": {
+            d: {h: dict(vals) for h, vals in hours.items()}
+            for d, hours in hourly_ahelps.items()
+        }
     }
 
 
