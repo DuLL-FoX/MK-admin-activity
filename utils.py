@@ -1,10 +1,8 @@
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple, Optional
-
-import pytz
 
 
 def configure_logging(level: int = logging.INFO) -> None:
@@ -52,10 +50,13 @@ def parse_message_time(message_timestamp: str) -> Optional[datetime]:
         return None
     try:
         msg_time = datetime.fromisoformat(message_timestamp)
-        msg_time = msg_time.astimezone(pytz.UTC)
+        if msg_time.tzinfo is None:
+            msg_time = msg_time.replace(tzinfo=timezone.utc)
+        else:
+            msg_time = msg_time.astimezone(timezone.utc)
         return msg_time
     except Exception as e:
-        logging.error(f"Error parsing message time '{message_timestamp}': {e}")
+        logging.error(f"Ошибка при парсинге времени сообщения '{message_timestamp}': {e}")
         return None
 
 
