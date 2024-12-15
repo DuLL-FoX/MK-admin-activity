@@ -11,7 +11,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 from data_processing import AdminStats, ServerStats, merge_duplicate_admins, fill_missing_roles
-from utils import clean_sheet_name
+from utils import clean_sheet_name, normalize_admin_string
+
 
 def clean_server_name(srv_name: str) -> str:
     prefix = "🤔┇ahelp-"
@@ -21,13 +22,14 @@ def clean_server_name(srv_name: str) -> str:
     srv_name = srv_name.replace("_", "-")
     return srv_name
 
+
 def write_df_to_excel_enhanced(
-    df: pd.DataFrame,
-    excel_filename: str,
-    sheet_name: str,
-    highlight_moderators: bool = False,
-    global_sheet: bool = False,
-    moderators_sheet: bool = False,
+        df: pd.DataFrame,
+        excel_filename: str,
+        sheet_name: str,
+        highlight_moderators: bool = False,
+        global_sheet: bool = False,
+        moderators_sheet: bool = False,
 ) -> None:
     sheet_name = clean_sheet_name(sheet_name)
 
@@ -56,9 +58,10 @@ def write_df_to_excel_enhanced(
                 role_cell = ws.cell(row=r_idx, column=2)
                 role_value = role_cell.value
                 if role_value and ("Модератор" in role_value or "Гейм-Мастер" in role_value or
-                                  "модератор" in role_value or "гейм-мастер" in role_value):
+                                   "модератор" in role_value or "гейм-мастер" in role_value):
                     for c in range(1, len(row) + 1):
-                        ws.cell(row=r_idx, column=c).fill = PatternFill(start_color="FFFFE0", end_color="FFFFE0", fill_type="solid")
+                        ws.cell(row=r_idx, column=c).fill = PatternFill(start_color="FFFFE0", end_color="FFFFE0",
+                                                                        fill_type="solid")
 
     ws.auto_filter.ref = ws.dimensions
     for col in ws.columns:
@@ -75,13 +78,21 @@ def write_df_to_excel_enhanced(
 
     wb.save(excel_filename)
 
+
 def create_daily_ahelps_dataframe(daily_ahelps: defaultdict[date, Dict[str, int]]) -> pd.DataFrame:
     if not daily_ahelps:
         return pd.DataFrame()
 
     all_dates = sorted(daily_ahelps.keys())
+
+    normalized_daily_ahelps: defaultdict[date, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for dt, admin_counts in daily_ahelps.items():
+        for admin, count in admin_counts.items():
+            normalized_admin = normalize_admin_string(admin)
+            normalized_daily_ahelps[dt][normalized_admin] += count
+
     all_admins = set()
-    for daily_data in daily_ahelps.values():
+    for daily_data in normalized_daily_ahelps.values():
         all_admins.update(daily_data.keys())
     all_admins = sorted(list(all_admins))
 
@@ -89,11 +100,12 @@ def create_daily_ahelps_dataframe(daily_ahelps: defaultdict[date, Dict[str, int]
     for admin in all_admins:
         admin_row = [admin]
         for day in all_dates:
-            admin_row.append(daily_ahelps[day].get(admin, 0))
+            admin_row.append(normalized_daily_ahelps[day].get(admin, 0))
         data.append(admin_row)
 
     df = pd.DataFrame(data, columns=["Администратор"] + [day.strftime("%Y-%m-%d") for day in all_dates])
     return df
+
 
 def aggregate_daily_ahelps(servers_stats: Dict[str, ServerStats]) -> defaultdict[date, Dict[str, int]]:
     global_daily_ahelps: defaultdict[date, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -105,6 +117,7 @@ def aggregate_daily_ahelps(servers_stats: Dict[str, ServerStats]) -> defaultdict
 
     return global_daily_ahelps
 
+
 def create_hourly_ahelps_dataframe(hourly_ahelps: Dict[date, Dict[int, Dict[str, int]]]) -> pd.DataFrame:
     rows = []
     for d, hours_data in hourly_ahelps.items():
@@ -115,6 +128,7 @@ def create_hourly_ahelps_dataframe(hourly_ahelps: Dict[date, Dict[int, Dict[str,
     df = df.sort_values(by=["Дата", "Час"])
     return df
 
+
 def aggregate_hourly_ahelps(servers_stats: Dict[str, ServerStats]) -> Dict[date, Dict[int, Dict[str, int]]]:
     global_hourly_ahelps = defaultdict(lambda: defaultdict(lambda: {"total": 0, "processed": 0}))
     for server_stats in servers_stats.values():
@@ -124,10 +138,11 @@ def aggregate_hourly_ahelps(servers_stats: Dict[str, ServerStats]) -> Dict[date,
                 global_hourly_ahelps[d][h]["processed"] += vals["processed"]
     return {d: {h: vals for h, vals in hours.items()} for d, hours in global_hourly_ahelps.items()}
 
+
 def save_all_data_to_excel(
-    global_admin_stats: Dict[str, AdminStats],
-    global_chat_count: int,
-    servers_stats: Dict[str, ServerStats],
+        global_admin_stats: Dict[str, AdminStats],
+        global_chat_count: int,
+        servers_stats: Dict[str, ServerStats],
 ) -> None:
     excel_filename = "united_stats.xlsx"
     if os.path.exists(excel_filename):
@@ -161,7 +176,7 @@ def save_all_data_to_excel(
     moderator_data = []
     for admin, stats in merged_global.items():
         if stats['role'] != "Не указано" and any(
-            keyword in stats["role"].lower() for keyword in ["модератор", "гейм-мастер"]
+                keyword in stats["role"].lower() for keyword in ["модератор", "гейм-мастер"]
         ):
             row = [admin, stats['role'], stats['ahelps']]
             for srv in server_names:
