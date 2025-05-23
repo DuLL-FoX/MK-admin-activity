@@ -75,41 +75,17 @@ async def on_ready():
     logging.info(f"Logged in as {client.user}.")
 
     data_folder = os.getenv("DATA_FOLDER", "data")
-    date_option = int(os.getenv("DATE_OPTION", "1"))
     channel_urls = os.getenv("CHANNEL_URLS", "").split(",")
 
     if not os.path.exists(data_folder):
         os.makedirs(data_folder)
         logging.info(f"Created data folder: {data_folder}")
 
-    if date_option == 1:
-        try:
-            from_date = os.getenv("FROM_DATE")
-            to_date = os.getenv("TO_DATE")
+    after_time = getattr(client, "after_time", None)
+    before_time = getattr(client, "before_time", None)
+    date_info = getattr(client, "date_info", "specified period")
 
-            if not from_date or not to_date:
-                logging.error("FROM_DATE and TO_DATE must be set in .env file when using DATE_OPTION=1")
-                await client.close()
-                return
-
-            after_time = datetime.strptime(from_date, "%Y-%m-%d")
-            before_time = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
-            date_info = f"from {from_date} to {to_date}"
-        except ValueError:
-            logging.error("Invalid date format. Use YYYY-MM-DD.")
-            await client.close()
-            return
-    elif date_option == 2:
-        days = int(os.getenv("DAYS", "14"))
-        after_time = datetime.utcnow() - timedelta(days=days)
-        before_time = None
-        date_info = f"last {days} days"
-    else:
-        logging.error("Invalid DATE_OPTION. Must be 1 or 2.")
-        await client.close()
-        return
-
-    logging.info(f"Downloading messages {date_info}")
+    logging.info(f"Downloading messages for {date_info}")
     logging.info(f"Channels to download: {len(channel_urls)}")
 
     for url in channel_urls:
@@ -130,7 +106,7 @@ async def on_ready():
             continue
 
         channel_name = await get_channel_name(channel_id)
-        logging.info(f"Downloading messages from channel {channel_name} ({channel_id}) {date_info}.")
+        logging.info(f"Downloading messages from channel {channel_name} ({channel_id}) for {date_info}.")
 
         messages = await fetch_messages(channel_id, after_time, before_time)
 
@@ -148,7 +124,7 @@ async def on_ready():
     await client.close()
 
 
-def main():
+def main(start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -166,6 +142,46 @@ def main():
     if not token:
         logging.error("DISCORD_USER_TOKEN not found in .env file")
         sys.exit(1)
+
+    date_option = int(os.getenv("DATE_OPTION", "1"))
+    after_time = None
+    before_time = None
+    date_info = ""
+
+    if start_date is not None:
+        after_time = start_date
+        date_info = f"from {start_date.strftime('%Y-%m-%d')}"
+
+        if end_date is not None:
+            before_time = end_date
+            date_info += f" to {end_date.strftime('%Y-%m-%d')}"
+    elif date_option == 1:
+        try:
+            from_date = os.getenv("FROM_DATE")
+            to_date = os.getenv("TO_DATE")
+
+            if not from_date or not to_date:
+                logging.error("FROM_DATE and TO_DATE must be set in .env file when using DATE_OPTION=1")
+                sys.exit(1)
+
+            after_time = datetime.strptime(from_date, "%Y-%m-%d")
+            before_time = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
+            date_info = f"from {from_date} to {to_date}"
+        except ValueError:
+            logging.error("Invalid date format. Use YYYY-MM-DD.")
+            sys.exit(1)
+    elif date_option == 2:
+        days = int(os.getenv("DAYS", "14"))
+        after_time = datetime.utcnow() - timedelta(days=days)
+        before_time = None
+        date_info = f"last {days} days"
+    else:
+        logging.error("Invalid DATE_OPTION. Must be 1 or 2.")
+        sys.exit(1)
+
+    setattr(client, "after_time", after_time)
+    setattr(client, "before_time", before_time)
+    setattr(client, "date_info", date_info)
 
     try:
         client.run(token, bot=False)

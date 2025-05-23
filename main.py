@@ -3,6 +3,7 @@ import os
 import sys
 from collections import defaultdict
 from typing import Tuple, Dict, List, Optional
+from datetime import datetime, timedelta
 
 import dotenv
 from tqdm import tqdm
@@ -15,7 +16,9 @@ from utils import extract_server_name, configure_logging, format_date_range
 
 def aggregate_global_stats(
         files: List[str],
-        progress_bar: Optional[tqdm] = None
+        progress_bar: Optional[tqdm] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
 ) -> Tuple[Dict[str, AdminStats], int, Dict[str, ServerStats]]:
     global_admin_stats = defaultdict(lambda: {"ahelps": 0, "mentions": 0, "role": "Unknown", "sessions": 0})
     global_chat_count = 0
@@ -28,6 +31,27 @@ def aggregate_global_stats(
         data = load_json_file(file_path)
         if not data:
             continue
+
+        if start_date or end_date:
+            filtered_data = []
+            for message in data:
+                created_at = message.get('created_at', '')
+                if not created_at:
+                    continue
+
+                try:
+                    msg_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+
+                    if start_date and msg_dt < start_date:
+                        continue
+                    if end_date and msg_dt > end_date:
+                        continue
+
+                    filtered_data.append(message)
+                except:
+                    filtered_data.append(message)
+
+            data = filtered_data
 
         server_name = extract_server_name(file_path)
         server_stats = analyze_ahelp_data(data, server_name)
@@ -85,6 +109,24 @@ def parse_arguments() -> argparse.Namespace:
         help="Enable verbose logging"
     )
 
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        help="Start date for report (format: YYYY-MM-DD)"
+    )
+
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        help="End date for report (format: YYYY-MM-DD)"
+    )
+
+    parser.add_argument(
+        "--days",
+        type=int,
+        help="Number of days to include in report (from today backwards)"
+    )
+
     return parser.parse_args()
 
 
@@ -101,18 +143,40 @@ def main() -> int:
     log_level = logging.INFO if not args.verbose else logging.DEBUG
     configure_logging(level=log_level)
 
+    start_date = None
+    end_date = None
+
+    if args.days:
+        start_date = datetime.now() - timedelta(days=args.days)
+        logging.info(f"Setting report period to last {args.days} days (from {start_date.strftime('%Y-%m-%d')})")
+
+    if args.start_date:
+        try:
+            start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
+            logging.info(f"Setting report start date to {args.start_date}")
+        except ValueError:
+            logging.error(f"Invalid start date format: {args.start_date}. Using YYYY-MM-DD format.")
+            return 1
+
+    if args.end_date:
+        try:
+            end_date = datetime.strptime(args.end_date, "%Y-%m-%d") + timedelta(days=1)
+            logging.info(f"Setting report end date to {args.end_date}")
+        except ValueError:
+            logging.error(f"Invalid end date format: {args.end_date}. Using YYYY-MM-DD format.")
+            return 1
+
     data_folder = args.data_folder or os.getenv("DATA_FOLDER", "data")
     excel_filename = args.output or os.getenv("EXCEL_FILENAME", "ahelp_stats.xlsx")
 
     if args.download:
         logging.info("Downloading messages...")
         try:
-            download_main()
+            download_main(start_date=start_date, end_date=end_date)
         except Exception as e:
             logging.error(f"Error downloading messages: {e}")
             return 1
 
-    # Get list of files to process
     files = get_downloaded_files(data_folder)
     if not files:
         logging.error(f"No JSON files found in {data_folder}")
@@ -120,17 +184,16 @@ def main() -> int:
 
     logging.info(f"Found {len(files)} JSON files to process")
 
-    # Process files with progress bar
     with tqdm(total=len(files), desc="Processing files") as pbar:
-        global_admin_stats, global_chat_count, servers_stats = aggregate_global_stats(files, pbar)
+        global_admin_stats, global_chat_count, servers_stats = aggregate_global_stats(
+            files, pbar, start_date, end_date
+        )
 
-    # Show summary
     total_ahelps = sum(stats["ahelps"] for stats in global_admin_stats.values())
     total_admins = len(global_admin_stats)
 
     logging.info(f"Analysis complete: {total_ahelps} ahelps, {global_chat_count} chats, {total_admins} admins")
 
-    # Get date range for log
     all_dates = []
     for server_stats in servers_stats.values():
         for day in server_stats["daily_ahelps"]:

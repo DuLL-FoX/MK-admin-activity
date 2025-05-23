@@ -3,10 +3,16 @@ import logging
 import os
 from collections import defaultdict
 from datetime import datetime, date
-from typing import Tuple, Optional, Dict, Any, TypedDict, List, DefaultDict, Set
+from typing import (
+    Tuple, Optional, Dict, Any, TypedDict, List, DefaultDict, Set,
+)
 
-from utils import extract_admin_info, parse_message_time, normalize_admin_string
-
+from utils import (
+    extract_admin_info,
+    extract_player_name,
+    parse_message_time,
+    normalize_admin_string,
+)
 
 class AdminStats(TypedDict):
     ahelps: int
@@ -26,56 +32,70 @@ DEFAULT_ADMIN_STATS: AdminStats = {
     "ahelps": 0,
     "mentions": 0,
     "role": "Unknown",
-    "sessions": 0
+    "sessions": 0,
 }
 
-
 def process_embed_data(
-        embeds: List[Dict[str, Any]],
-        message_datetime: Optional[datetime]
+    embeds: List[Dict[str, Any]],
+    message_datetime: Optional[datetime],
 ) -> Tuple[Dict[str, AdminStats], int, Dict[str, int], int, int]:
-    admin_stats: DefaultDict[str, AdminStats] = defaultdict(lambda: dict(DEFAULT_ADMIN_STATS.copy()))
+    """
+    Inspect every embed in a Discord message and collect per-session statistics.
+    Returns:
+        admin_stats, chat_count, daily_ahelps, total_ahelps, processed_ahelps
+    """
+    admin_stats: DefaultDict[str, AdminStats] = defaultdict(
+        lambda: dict(DEFAULT_ADMIN_STATS.copy())
+    )
     daily_ahelps: DefaultDict[str, int] = defaultdict(int)
     chat_count = 0
     total_ahelps_count = 0
     processed_ahelps_count = 0
 
     for embed in embeds:
-        description = embed.get('description', '')
+        description = embed.get("description", "")
         if not description:
             continue
 
-        lines = description.split('\n')
-        is_chat = any(':inbox_tray:' in line or ':outbox_tray:' in line for line in lines)
+        lines = description.split("\n")
+        is_chat = any(
+            ":inbox_tray:" in l or ":outbox_tray:" in l
+            for l in lines
+        )
         if not is_chat:
             continue
 
         admins_in_session: Set[str] = set()
+        players_in_session: Set[str] = set()
         has_ahelp = False
         admin_responded = False
 
         for line in lines:
             if ":outbox_tray:" in line:
-                admin_info = extract_admin_info(line)
-                if admin_info:
-                    admin_name, admin_role = admin_info
-                    if admin_name:
-                        normalized_admin = normalize_admin_string(admin_name)
-                        admins_in_session.add(normalized_admin)
-                        if admin_role and admin_role != "Unknown":
-                            admin_stats[normalized_admin]["role"] = normalize_admin_string(admin_role)
+                name, role = extract_admin_info(line)
+                if name:
+                    norm = normalize_admin_string(name)
+                    admins_in_session.add(norm)
+                    if role and role != "Unknown":
+                        admin_stats[norm]["role"] = normalize_admin_string(role)
                 admin_responded = True
 
             elif ":inbox_tray:" in line:
                 has_ahelp = True
+                player = extract_player_name(line)
+                if player:
+                    players_in_session.add(player)
+
                 for admin in admins_in_session:
-                    admin_stats[admin]["mentions"] += 1
+                    if admin != player:
+                        admin_stats[admin]["mentions"] += 1
 
         if is_chat:
             chat_count += 1
             for admin in admins_in_session:
                 admin_stats[admin]["sessions"] += 1
-                if has_ahelp:
+
+                if has_ahelp and admin not in players_in_session:
                     admin_stats[admin]["ahelps"] += 1
                     if message_datetime:
                         daily_ahelps[admin] += 1
@@ -85,8 +105,13 @@ def process_embed_data(
             if admin_responded:
                 processed_ahelps_count += 1
 
-    return dict(admin_stats), chat_count, dict(daily_ahelps), total_ahelps_count, processed_ahelps_count
-
+    return (
+        dict(admin_stats),
+        chat_count,
+        dict(daily_ahelps),
+        total_ahelps_count,
+        processed_ahelps_count,
+    )
 
 def load_json_file(file_path: str) -> Optional[Any]:
     if not os.path.isfile(file_path):
@@ -110,7 +135,8 @@ def load_json_file(file_path: str) -> Optional[Any]:
     return None
 
 
-def analyze_ahelp_data(data: Any, server_name: str) -> ServerStats:
+def analyze_ahelp_data(data: Any, server_name: str, start_date: Optional[datetime] = None,
+                       end_date: Optional[datetime] = None) -> ServerStats:
     admin_stats: DefaultDict[str, AdminStats] = defaultdict(lambda: DEFAULT_ADMIN_STATS.copy())
     total_chat_count = 0
     daily_ahelps: DefaultDict[date, DefaultDict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -130,6 +156,19 @@ def analyze_ahelp_data(data: Any, server_name: str) -> ServerStats:
     logging.info(f"Analyzing {len(data)} messages from server {server_name}")
 
     for message in data:
+        if start_date or end_date:
+            message_timestamp = message.get('created_at', '')
+            msg_dt = parse_message_time(message_timestamp)
+
+            if not msg_dt:
+                continue
+
+            if start_date and msg_dt < start_date:
+                continue
+
+            if end_date and msg_dt > end_date:
+                continue
+
         embeds = message.get('embeds', [])
         if not embeds:
             continue

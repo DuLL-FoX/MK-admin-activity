@@ -64,11 +64,11 @@ def setup_worksheet_styles(workbook: Workbook) -> None:
 
 def adjust_column_widths(worksheet: Worksheet) -> None:
     column_widths = {
-        'A': 50,  # Administrator/Server name
-        'B': 50,  # Role
-        'C': 15,  # Ahelps/Total
-        'D': 15,  # Mentions/Processed
-        'E': 15  # Sessions/Percentage
+        'A': 50,
+        'B': 50,
+        'C': 15,
+        'D': 15,
+        'E': 15
     }
 
     for i in range(6, 27):
@@ -124,7 +124,6 @@ def add_metadata_to_worksheet(
 ) -> None:
     worksheet.insert_rows(1, 4)
 
-    # Add title
     worksheet.cell(1, 1, title)
     worksheet.cell(1, 1).font = Font(bold=True, size=16)
     worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5)
