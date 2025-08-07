@@ -24,6 +24,7 @@ HEADER_FONT = Font(bold=True, color="FFFFFF", size=12)
 ALT_ROW_FILL = PatternFill(start_color="E6F0FF", end_color="E6F0FF", fill_type="solid")
 MODERATOR_FILL = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
 HIGHLIGHT_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+ADMIN_ONLY_FILL = PatternFill(start_color="FFCCCB", end_color="FFCCCB", fill_type="solid")
 BORDER = Border(
     left=Side(style='thin', color='000000'),
     right=Side(style='thin', color='000000'),
@@ -57,7 +58,12 @@ def setup_worksheet_styles(workbook: Workbook) -> None:
     alt_row_style.alignment = Alignment(horizontal="center", vertical="center")
     alt_row_style.border = BORDER
 
-    for style in [header_style, cell_style, alt_row_style]:
+    admin_only_style = NamedStyle(name="admin_only_style")
+    admin_only_style.fill = ADMIN_ONLY_FILL
+    admin_only_style.alignment = Alignment(horizontal="center", vertical="center")
+    admin_only_style.border = BORDER
+
+    for style in [header_style, cell_style, alt_row_style, admin_only_style]:
         if style.name not in workbook.named_styles:
             workbook.add_named_style(style)
 
@@ -68,10 +74,13 @@ def adjust_column_widths(worksheet: Worksheet) -> None:
         'B': 50,
         'C': 15,
         'D': 15,
-        'E': 15
+        'E': 15,
+        'F': 18,
+        'G': 18,
+        'H': 18,
     }
 
-    for i in range(6, 27):
+    for i in range(9, 35):
         col_letter = get_column_letter(i)
         column_widths[col_letter] = 15
 
@@ -86,7 +95,8 @@ def apply_worksheet_formatting(
         worksheet: Worksheet,
         has_header: bool = True,
         highlight_moderators: bool = False,
-        highlight_column: Optional[int] = None
+        highlight_column: Optional[int] = None,
+        admin_only_columns: Optional[List[int]] = None
 ) -> None:
     if has_header:
         for cell in worksheet[1]:
@@ -105,6 +115,9 @@ def apply_worksheet_formatting(
 
             if highlight_column and cell.column == highlight_column:
                 cell.fill = HIGHLIGHT_FILL
+
+            if admin_only_columns and cell.column in admin_only_columns:
+                cell.fill = ADMIN_ONLY_FILL
 
         if highlight_moderators and len(row) > 1 and not isinstance(row[1], MergedCell):
             role_cell = row[1]
@@ -126,7 +139,7 @@ def add_metadata_to_worksheet(
 
     worksheet.cell(1, 1, title)
     worksheet.cell(1, 1).font = Font(bold=True, size=16)
-    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5)
+    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
 
     if server_name:
         worksheet.cell(2, 1, f"Server: {server_name}")
@@ -153,6 +166,7 @@ def write_df_to_excel_enhanced(
         sort_column: Optional[str] = None,
         ascending: bool = False,
         metadata: Optional[Dict[str, str]] = None,
+        admin_only_columns: Optional[List[str]] = None,
 ) -> None:
     try:
         sheet_name = clean_sheet_name(sheet_name)
@@ -196,11 +210,21 @@ def write_df_to_excel_enhanced(
             except:
                 pass
 
+        admin_only_column_indices = None
+        if admin_only_columns:
+            admin_only_column_indices = []
+            for col_name in admin_only_columns:
+                try:
+                    admin_only_column_indices.append(df.columns.get_loc(col_name) + 1)
+                except:
+                    pass
+
         apply_worksheet_formatting(
             ws,
             has_header=True,
             highlight_moderators=highlight_moderators,
-            highlight_column=highlight_column
+            highlight_column=highlight_column,
+            admin_only_columns=admin_only_column_indices
         )
 
         if len(df) > 0:
@@ -347,7 +371,9 @@ def create_summary_dataframe(
     for server_name, stats in servers_stats.items():
         admin_count = len(stats["admin_stats"])
         ahelp_count = sum(a["ahelps"] for a in stats["admin_stats"].values())
+        admin_only_ahelp_count = sum(a["admin_only_ahelps"] for a in stats["admin_stats"].values())
         mention_count = sum(a["mentions"] for a in stats["admin_stats"].values())
+        admin_only_mention_count = sum(a["admin_only_mentions"] for a in stats["admin_stats"].values())
         moderator_count = sum(1 for a in stats["admin_stats"].values() if
                               "модератор" in a["role"].lower() or "гейм-мастер" in a["role"].lower())
 
@@ -355,14 +381,17 @@ def create_summary_dataframe(
             clean_server_name(server_name),
             stats["chat_count"],
             ahelp_count,
+            admin_only_ahelp_count,
             admin_count,
             moderator_count,
-            mention_count
+            mention_count,
+            admin_only_mention_count
         ])
 
     server_df = pd.DataFrame(
         server_data,
-        columns=["Server", "Chats", "Ahelps", "Admins", "Moderators", "Mentions"]
+        columns=["Server", "Chats", "Ahelps", "Admin Only Ahelps", "Admins", "Moderators", "Mentions",
+                 "Admin Only Mentions"]
     )
 
     normalized_global_admin_stats = {}
@@ -372,14 +401,19 @@ def create_summary_dataframe(
         normalized_stats["role"] = normalized_role
         normalized_global_admin_stats[admin] = normalized_stats
 
-    role_counts = defaultdict(lambda: {"count": 0, "ahelps": 0, "mentions": 0, "sessions": 0})
+    role_counts = defaultdict(
+        lambda: {"count": 0, "ahelps": 0, "admin_only_ahelps": 0, "mentions": 0, "admin_only_mentions": 0,
+                 "sessions": 0, "admin_only_sessions": 0})
 
     for admin, stats in normalized_global_admin_stats.items():
         role = stats["role"]
         role_counts[role]["count"] += 1
         role_counts[role]["ahelps"] += stats["ahelps"]
+        role_counts[role]["admin_only_ahelps"] += stats["admin_only_ahelps"]
         role_counts[role]["mentions"] += stats["mentions"]
+        role_counts[role]["admin_only_mentions"] += stats["admin_only_mentions"]
         role_counts[role]["sessions"] += stats["sessions"]
+        role_counts[role]["admin_only_sessions"] += stats["admin_only_sessions"]
 
     role_data = []
     for role, counts in role_counts.items():
@@ -387,13 +421,17 @@ def create_summary_dataframe(
             role,
             counts["count"],
             counts["ahelps"],
+            counts["admin_only_ahelps"],
             counts["mentions"],
-            counts["sessions"]
+            counts["admin_only_mentions"],
+            counts["sessions"],
+            counts["admin_only_sessions"]
         ])
 
     role_df = pd.DataFrame(
         role_data,
-        columns=["Role", "Admin Count", "Total Ahelps", "Total Mentions", "Total Sessions"]
+        columns=["Role", "Admin Count", "Total Ahelps", "Admin Only Ahelps", "Total Mentions", "Admin Only Mentions",
+                 "Total Sessions", "Admin Only Sessions"]
     )
 
     return server_df, role_df
@@ -435,7 +473,8 @@ def save_all_data_to_excel(
                 'data_range': date_range
             },
             sort_column="Ahelps",
-            ascending=False
+            ascending=False,
+            admin_only_columns=["Admin Only Ahelps", "Admin Only Mentions"]
         )
 
         write_df_to_excel_enhanced(
@@ -448,13 +487,15 @@ def save_all_data_to_excel(
                 'data_range': date_range
             },
             sort_column="Total Ahelps",
-            ascending=False
+            ascending=False,
+            admin_only_columns=["Admin Only Ahelps", "Admin Only Mentions", "Admin Only Sessions"]
         )
 
         merged_global = merge_duplicate_admins(global_admin_stats)
         fill_missing_roles(merged_global, servers_stats)
 
         admin_server_ahelps = defaultdict(dict)
+        admin_server_admin_only_ahelps = defaultdict(dict)
         server_names = sorted(servers_stats.keys())
         cleaned_server_names = [clean_server_name(srv) for srv in server_names]
 
@@ -462,19 +503,37 @@ def save_all_data_to_excel(
             merged_server_stats = merge_duplicate_admins(sstats["admin_stats"])
             for admin, stats in merged_server_stats.items():
                 admin_server_ahelps[admin][clean_server_name(server_name)] = stats['ahelps']
+                admin_server_admin_only_ahelps[admin][clean_server_name(server_name)] = stats['admin_only_ahelps']
 
         global_data = []
         for admin, stats in merged_global.items():
-            row = [admin, stats['role'], stats['ahelps'], stats['mentions'], stats['sessions']]
+            row = [
+                admin,
+                stats['role'],
+                stats['ahelps'],
+                stats['mentions'],
+                stats['sessions'],
+                stats['admin_only_ahelps'],
+                stats['admin_only_mentions'],
+                stats['admin_only_sessions']
+            ]
             for srv in cleaned_server_names:
                 row.append(admin_server_ahelps[admin].get(srv, 0))
+            for srv in cleaned_server_names:
+                row.append(admin_server_admin_only_ahelps[admin].get(srv, 0))
             global_data.append(row)
 
         global_columns = [
-                             "Administrator", "Role", "Total Ahelps", "Mentions", "Sessions"
-                         ] + cleaned_server_names
+                             "Administrator", "Role", "Total Ahelps", "Mentions", "Sessions",
+                             "Admin Only Ahelps", "Admin Only Mentions", "Admin Only Sessions"
+                         ] + [f"{srv} Ahelps" for srv in cleaned_server_names] + [f"{srv} Admin Only" for srv in
+                                                                                  cleaned_server_names]
 
         df_global = pd.DataFrame(global_data, columns=global_columns)
+
+        admin_only_cols = ["Admin Only Ahelps", "Admin Only Mentions", "Admin Only Sessions"] + [f"{srv} Admin Only" for
+                                                                                                 srv in
+                                                                                                 cleaned_server_names]
 
         write_df_to_excel_enhanced(
             df_global,
@@ -488,7 +547,8 @@ def save_all_data_to_excel(
                 'data_range': date_range
             },
             sort_column="Total Ahelps",
-            ascending=False
+            ascending=False,
+            admin_only_columns=admin_only_cols
         )
 
         moderator_data = []
@@ -496,9 +556,20 @@ def save_all_data_to_excel(
             if stats['role'] != "Unknown" and any(
                     keyword in stats["role"].lower() for keyword in ["модератор", "гейм-мастер"]
             ):
-                row = [admin, stats['role'], stats['ahelps'], stats['mentions'], stats['sessions']]
+                row = [
+                    admin,
+                    stats['role'],
+                    stats['ahelps'],
+                    stats['mentions'],
+                    stats['sessions'],
+                    stats['admin_only_ahelps'],
+                    stats['admin_only_mentions'],
+                    stats['admin_only_sessions']
+                ]
                 for srv in cleaned_server_names:
                     row.append(admin_server_ahelps[admin].get(srv, 0))
+                for srv in cleaned_server_names:
+                    row.append(admin_server_admin_only_ahelps[admin].get(srv, 0))
                 moderator_data.append(row)
 
         df_moderators = pd.DataFrame(moderator_data, columns=global_columns)
@@ -514,7 +585,8 @@ def save_all_data_to_excel(
                 'data_range': date_range
             },
             sort_column="Total Ahelps",
-            ascending=False
+            ascending=False,
+            admin_only_columns=admin_only_cols
         )
 
         for server_name, stats in servers_stats.items():

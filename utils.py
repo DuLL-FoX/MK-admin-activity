@@ -16,6 +16,7 @@ PLAYER_INFO_PATTERN: Pattern = re.compile(
 
 SERVER_NAME_PATTERN: Pattern = re.compile(r"ahelp-(.+?)\s*\[")
 
+
 def configure_logging(level: int = logging.INFO,
                       log_file: Optional[str] = "ahelp_analyzer.log") -> None:
     handlers = [logging.StreamHandler()]
@@ -32,6 +33,7 @@ def configure_logging(level: int = logging.INFO,
     logging.getLogger("PIL").setLevel(logging.WARNING)
     logging.getLogger("discord").setLevel(logging.WARNING)
 
+
 def clean_sheet_name(sheet_name: str) -> str:
     sheet_name = re.sub(r"[\\/*?:\[\]]", "_", sheet_name)
     sheet_name = re.sub(r"\W+", "_", sheet_name)
@@ -47,16 +49,20 @@ def normalize_admin_string(s: str) -> str:
     return s.strip()
 
 
-def extract_admin_info(line: str) -> Tuple[Optional[str], Optional[str]]:
+def extract_admin_info(line: str) -> Tuple[Optional[str], Optional[str], bool]:
     """
-    From an :outbox_tray: line return (admin_name, admin_role).
+    From an :outbox_tray: line return (admin_name, admin_role, is_admin_only).
     Role may be 'Unknown' if it cannot be determined.
+    is_admin_only is True if the line contains "(Admin Only)".
     """
     match = ADMIN_INFO_PATTERN.search(line)
     if not match:
-        return None, None
+        return None, None, False
 
     admin_info_part = match.group(1)
+
+    is_admin_only = "(Admin Only)" in admin_info_part
+
     if "|" in admin_info_part:
         parts = [p.strip() for p in admin_info_part.split("|")]
         admin_name = parts[-1]
@@ -65,7 +71,7 @@ def extract_admin_info(line: str) -> Tuple[Optional[str], Optional[str]]:
         admin_name = admin_info_part
         admin_role = "Unknown"
 
-    return normalize_admin_string(admin_name), normalize_admin_string(admin_role)
+    return normalize_admin_string(admin_name), normalize_admin_string(admin_role), is_admin_only
 
 
 def extract_player_name(line: str) -> Optional[str]:

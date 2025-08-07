@@ -1,0 +1,9 @@
+.env
+ahelp_analyzer.log
+.venv
+__pycache__/
+logs/
+data/
+.idea/
+ahelp_stats_*
+discord_download.log

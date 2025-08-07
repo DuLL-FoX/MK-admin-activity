@@ -20,7 +20,15 @@ def aggregate_global_stats(
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
 ) -> Tuple[Dict[str, AdminStats], int, Dict[str, ServerStats]]:
-    global_admin_stats = defaultdict(lambda: {"ahelps": 0, "mentions": 0, "role": "Unknown", "sessions": 0})
+    global_admin_stats = defaultdict(lambda: {
+        "ahelps": 0,
+        "mentions": 0,
+        "role": "Unknown",
+        "sessions": 0,
+        "admin_only_ahelps": 0,
+        "admin_only_mentions": 0,
+        "admin_only_sessions": 0
+    })
     global_chat_count = 0
     servers_stats = {}
 
@@ -60,6 +68,9 @@ def aggregate_global_stats(
         for admin, stats in server_stats["admin_stats"].items():
             global_admin_stats[admin]["ahelps"] += stats["ahelps"]
             global_admin_stats[admin]["mentions"] += stats["mentions"]
+            global_admin_stats[admin]["admin_only_ahelps"] += stats["admin_only_ahelps"]
+            global_admin_stats[admin]["admin_only_mentions"] += stats["admin_only_mentions"]
+            global_admin_stats[admin]["admin_only_sessions"] += stats["admin_only_sessions"]
             if global_admin_stats[admin]["role"] == "Unknown" and stats["role"] != "Unknown":
                 global_admin_stats[admin]["role"] = stats["role"]
             global_admin_stats[admin]["sessions"] += stats["sessions"]
@@ -118,7 +129,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--end-date",
         type=str,
-        help="End date for report (format: YYYY-MM-DD)"
+        help="Start date for report (format: YYYY-MM-DD)"
     )
 
     parser.add_argument(
@@ -190,9 +201,10 @@ def main() -> int:
         )
 
     total_ahelps = sum(stats["ahelps"] for stats in global_admin_stats.values())
+    total_admin_only_ahelps = sum(stats["admin_only_ahelps"] for stats in global_admin_stats.values())
     total_admins = len(global_admin_stats)
 
-    logging.info(f"Analysis complete: {total_ahelps} ahelps, {global_chat_count} chats, {total_admins} admins")
+    logging.info(f"Analysis complete: {total_ahelps} regular ahelps, {total_admin_only_ahelps} admin-only ahelps, {global_chat_count} chats, {total_admins} admins")
 
     all_dates = []
     for server_stats in servers_stats.values():
