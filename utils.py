@@ -5,30 +5,18 @@ from datetime import datetime, timezone
 from typing import Tuple, Optional, Pattern
 
 ADMIN_INFO_PATTERN: Pattern = re.compile(
-    r":outbox_tray:\s*(?:\*\*)?(?:[\d:]{5,8}|[\d:]{2,5})?\s*(?:\*\*)?\s*(.+?):\s*(.+)",
-    re.UNICODE,
-)
-
+    r":outbox_tray:\s*(?:\*\*)?(?:[\d:]{5,8}|[\d:]{2,5})?\s*(?:\*\*)?\s*(.+?):\s*(.+)", re.UNICODE)
 PLAYER_INFO_PATTERN: Pattern = re.compile(
-    r":inbox_tray:\s*(?:\*\*)?(?:[\d:]{2,8})?\s*(?:\*\*)?\s*(.+?):",
-    re.UNICODE,
-)
-
+    r":inbox_tray:\s*(?:\*\*)?(?:[\d:]{2,8})?\s*(?:\*\*)?\s*(.+?):", re.UNICODE)
 SERVER_NAME_PATTERN: Pattern = re.compile(r"ahelp-(.+?)\s*\[")
 
 
-def configure_logging(level: int = logging.INFO,
-                      log_file: Optional[str] = "ahelp_analyzer.log") -> None:
+def configure_logging(level: int = logging.INFO, log_file: Optional[str] = "ahelp_analyzer.log") -> None:
     handlers = [logging.StreamHandler()]
     if log_file:
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
-
     logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=handlers,
-    )
-
+        level=level, format="%(asctime)s - %(levelname)s - %(message)s", handlers=handlers)
     logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
     logging.getLogger("PIL").setLevel(logging.WARNING)
     logging.getLogger("discord").setLevel(logging.WARNING)
@@ -41,7 +29,6 @@ def clean_sheet_name(sheet_name: str) -> str:
 
 
 def normalize_admin_string(s: str) -> str:
-    """Strip markdown, discriminators, legacy tags, etc. and squash spaces."""
     s = re.sub(r"\(Admin Only\)", "", s, flags=re.IGNORECASE)
     s = re.sub(r"\(S\)\s*", "", s)
     s = s.replace("**", "")
@@ -50,19 +37,11 @@ def normalize_admin_string(s: str) -> str:
 
 
 def extract_admin_info(line: str) -> Tuple[Optional[str], Optional[str], bool]:
-    """
-    From an :outbox_tray: line return (admin_name, admin_role, is_admin_only).
-    Role may be 'Unknown' if it cannot be determined.
-    is_admin_only is True if the line contains "(Admin Only)".
-    """
     match = ADMIN_INFO_PATTERN.search(line)
     if not match:
         return None, None, False
-
     admin_info_part = match.group(1)
-
     is_admin_only = "(Admin Only)" in admin_info_part
-
     if "|" in admin_info_part:
         parts = [p.strip() for p in admin_info_part.split("|")]
         admin_name = parts[-1]
@@ -70,12 +49,10 @@ def extract_admin_info(line: str) -> Tuple[Optional[str], Optional[str], bool]:
     else:
         admin_name = admin_info_part
         admin_role = "Unknown"
-
     return normalize_admin_string(admin_name), normalize_admin_string(admin_role), is_admin_only
 
 
 def extract_player_name(line: str) -> Optional[str]:
-    """Return the nickname that follows :inbox_tray:, or None if not found."""
     match = PLAYER_INFO_PATTERN.search(line)
     if not match:
         return None
@@ -93,7 +70,7 @@ def parse_message_time(message_timestamp: str) -> Optional[datetime]:
             dt = dt.astimezone(timezone.utc)
         return dt
     except Exception as e:
-        logging.error(f"Error parsing message timestamp '{message_timestamp}': {e}")
+        logging.error(f"Ошибка парсинга времени сообщения '{message_timestamp}': {e}")
         return None
 
 
@@ -105,9 +82,9 @@ def extract_server_name(file_path: str) -> str:
 
 def format_date_range(start_date: Optional[str], end_date: Optional[str]) -> str:
     if start_date and end_date:
-        return f"{start_date} to {end_date}"
+        return f"{start_date} до {end_date}"
     if start_date:
-        return f"From {start_date}"
+        return f"С {start_date}"
     if end_date:
-        return f"Until {end_date}"
-    return "All dates"
+        return f"До {end_date}"
+    return "Все даты"
